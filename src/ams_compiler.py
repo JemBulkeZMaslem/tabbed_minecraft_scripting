@@ -1,288 +1,171 @@
 import warnings
 
-help_str = """
-ams transpiler is designed for mincraft mcfunctions to be transformed from a more human readable version into a minecraft runnable version.
-
--h  Show this message
-    Alias: --help, --h
-
-===========================
-
--c  Provide a config file.
-    ams -c [filename]
-
--i  Provide input file.
-    Not compatible with -c
-    ams -i [filename]
-
--o  Provide an output file
-    Not Compatible with -c.
-    Must first provide input file with -i [filename]
-    ams -i [filename] -o [filename]
-
--p  Creates project file. Must comply with following format:
-    ams -p [project file] -i [filename(s)] -o [filename(s)]
-    Alias: --createproject
-
-    Example: ams -p project.json -i in1 in2 in3 -o out1 out2 out3
-
--a  Defines an alias in an existing project. Must comply with the following format:
-    ams -a <key> <value> <project>
-
-    If any string contains a space the string must be surrounded by quotation marks.
-    Example:
-
-    ams -a location \"x y z\" project.py
-
--d  Show debug information
-    ams [options] -d
-
-    Alias: --debug
-"""
-
 def main():
     import json
-    from sys import argv as args
+    import argparse
 
-    # Initialiizing to read args from command line
-    arg_pointer = 1
+    parser = argparse.ArgumentParser(
+        prog = 'ams',
+        description = 'Compiles ams into mcfunction.')
 
-    cdict = {}
-    config = False
-    input = False
-    output = False
-    debug = False
-    args_supplied = False
+    parser.add_argument('-v', '--verbose', action='store_true', help='Show more information.')
+    parser.add_argument('-d', '--debug', action='store_true', help='Show debug information.')
+    parser.add_argument('-c', dest='config', help='Provide a config file.')
+    parser.add_argument('-i', type=str, nargs='+', default=[], metavar='FILE', help='Provide input file.')
+    parser.add_argument('-o', type=str, nargs='+', default=[], metavar='FILE', help='Provide an output file.')
+    parser.add_argument('-dirs', type=str, nargs='+', default=[], metavar=('INPUT_DIR', 'OUTPUT_DIR'), help='Provide pairs of input and output directories.')
+    parser.add_argument('-e', '--extension', type=str, help='Provide extension filter for input directory/directories.')
+    parser.add_argument('-p', '--createproject', dest='project', type=str, help='Creates project file.')
+    parser.add_argument('-a', '--define', dest='alias', type=str, nargs=3, metavar=('KEY', 'VALUE', 'PROJECT'), help='Defines an alias in an existing project.')
 
-    # import args from command line
+    args = parser.parse_args()
 
-    if len(args) == 1:
-        print("Must provide args. Type 'ams -h' for help.")
+    # check arguments
+    if args.i and args.o and len(args.i) != len(args.o):
+        print("ERROR: Number of input files must match output files.")
+        exit(1)
+    if args.dirs and len(args.dirs) % 2 == 1:
+        print("ERROR: Provided parameters to -dir option aren't pairs.")
         exit(1)
 
-    elif args[arg_pointer] == "-h" or args[arg_pointer] == "--h" or args[arg_pointer] == "--help":
-        print(help_str)
+    config = {
+        'ifiles': args.i,
+        'ofiles': args.o,
+        'dirs': args.dirs,
+        'define': {}
+    }
+
+    if args.project:
+        new_project = {}
+        # add directories to project if any
+        if args.dirs:
+            new_project['dirs'] = args.dirs
+        # add files to project if any
+        if args.i and args.o:
+            new_project['ifiles'] = args.i
+            new_project['ofiles'] = args.o
+        # write to file
+        with open(args.project, 'w', encoding='utf-8') as f:
+            json.dump(new_project, f, indent=4)
         exit()
-
-    elif args[arg_pointer] == "-p" or args[arg_pointer] == "--createproject":
-        create_project(args, 1, json)
-        exit()
-
-    elif args[arg_pointer] == "-a" or args[arg_pointer] == "--define":
-        add_definition(args, 1)
-        exit()
-
-
-    while arg_pointer < len(args):
-
-        if args[arg_pointer] == "-c":
-            config = True
-            args_supplied = True
-            try:
-                cfile = args[arg_pointer+1]
-            except:
-                raise ValueError("Please supply a config file")
-
-            arg_pointer += 2
-            continue
-
-        if args[arg_pointer] == "-i" and config == False:
-
-            args_supplied = True
-            input = True
-            try:
-                cdict["ifiles"] = [args[arg_pointer+1]]
-                if not output:
-                    cdict["ofiles"] = ["out_"+args[arg_pointer+1]]
-            except:
-                raise ValueError("-i requires an input file.\nUsage: -i [filename]")
-
-
-            arg_pointer += 2
-            continue
-
-        if args[arg_pointer] == "-o" and config == False:
-
-            args_supplied = True
-            output = True
-            try:
-                cdict["ofiles"] = [args[arg_pointer+1]]
-            except:
-                raise ValueError("-o requires an input file.\nUsage: -o [filename]")
-
-            arg_pointer += 2
-            continue
-
-        if args[arg_pointer] == "-d" or args[arg_pointer] == "--debug":
-
-            args_supplied = True
-            debug = True
-            arg_pointer += 1
-            continue
-
-
-        print(f"Did not recognize this argument: {args[arg_pointer]}. Ignoring...")
-        arg_pointer += 1
-
-    if not args_supplied:
-        print("Must provide args. Type 'ams -h' for help.")
-        exit(1)
-
-    # Read Config file
-
-    if config:
+    
+    if args.config:
         try:
-            with open(cfile) as file:
-                loaded_config_dict = json.load(file)
+            with open(args.config, 'r', encoding='utf-8') as f:
+                loaded_config = json.load(f)
+                # verify given config
+                if not ("ifiles" in loaded_config and "ofiles" in loaded_config):
+                    print("ERROR: Config file must provide ifiles and ofiles.")
+                    exit(1)
+                elif len(loaded_config["ifiles"]) != len(loaded_config["ofiles"]):
+                    print("ERROR: Number of input files must match output files.")
+                    exit(1)
+                config = loaded_config
+        except FileNotFoundError:
+            print("ERROR: Provided config file could not be found.")
+            exit(1)
+    if args.alias:
+        from os.path import isfile
+            
+        key, value, path = args.alias
+        if not isfile(path):
+            print(f"\"{path}\" is not a file.")
+            exit(1)
+
+        try:
+            with open(path, "r") as f:
+                content_dict = json.load(f)
         except:
-            raise ValueError(f"Failed to read config file {cfile}")
+            print(f"Failed to read json at \"{path}\"\nPlease create a valid file first. (See -h)")
+            return
 
-        # Check Values
+        # Create definition if it does not exist
+        if not "define" in content_dict:
+            content_dict["define"] = dict()
 
-        if not ("ifiles" in loaded_config_dict and "ofiles" in loaded_config_dict):
-            raise ValueError("Config file must provide ifiles and ofiles.")
-        elif len(loaded_config_dict["ifiles"]) != len(loaded_config_dict["ofiles"]):
-            raise ValueError(f"Number of input files must match output files.")
+        if key in content_dict["define"]:
+            print(f"{key} already exists: {content_dict['define'][key]}.")
 
-        cdict = {**loaded_config_dict, **cdict}
+            while True:
+                answer = input("Would you like to overwrite? (Y/N): ")
 
-    # Read and compile each file in config.
-    if debug:
-        print("Config:\n")
-        print(json.dumps(cdict, indent = 2))
+                if answer == "N" or answer == "n":
+                    print("Aborting.")
+                    return
+                elif answer == "Y" or answer == "y":
+                    break
+                else:
+                    print("Invalid answer.\n")
 
-    for i in range(len(cdict["ifiles"])):
-        in_file = cdict["ifiles"][i]
-        out_file = cdict["ofiles"][i]
+            content_dict["define"][key] = value
 
-        print(f"Compiling {in_file}...")
+        else:
+            content_dict["define"][key] = value
+
+        with open(path, "w") as f:
+            json.dump(content_dict, f, indent=2)
+
+    def compile_file(in_file, out_file, verbose):
+        if verbose:
+            print(f"Compiling {in_file}...")
 
         with open(in_file, "r") as inf:
             in_text = inf.read()
 
-        if "define" in cdict:
-            for alias in cdict["define"]:
-                in_text = in_text.replace(alias, cdict["define"][alias])
+        if "define" in config:
+            for alias in config["define"]:
+                in_text = in_text.replace(alias, config["define"][alias])
 
         in_text = in_text.split("\n")
 
-        tree_list = build_tree(in_text, debug=debug)
+        tree_list = build_tree(in_text, debug=args.debug)
 
         out_text = compile_tree_list(tree_list)
 
         with open(out_file, "w") as out:
             out.write(out_text)
+        if verbose:
+            print("DONE!\n")
 
-        print("DONE!\n")
+    # Read and compile each file in config.
+    if args.debug:
+        print("Config:\n")
+        print(json.dumps(config, indent = 2))
 
-def add_definition(args, pointer):
-    from os.path import isfile
-    import json
-    """
-    Creates a definition for a project file.
-    Usage: ams -d <key> <value> <project file>
-    """
-
-    if len(args) < 5:
-        print("Did not provide enough arguments.")
-        return
-
-    key = args[pointer+1]
-    value = args[pointer+2]
-    path = args[pointer+3]
-
-
-    if not isfile(path):
-        print(f"\"{path}\" is not a file.")
-        return
-
-    try:
-        with open(path, "r") as f:
-            content_dict = json.load(f)
-    except:
-        print(f"Failed to read json at \"{path}\"\nPlease create a valid file first. (See -h)")
-        return
-
-    # Create definition if it does not exist
-    if not "define" in content_dict:
-        content_dict["define"] = dict()
-
-    if key in content_dict["define"]:
-        print(f"{key} already exists: {content_dict['define'][key]}.")
-
-
-        while True:
-            answer = input("Would you like to overwrite? (Y/N): ")
-
-            if answer == "N" or answer == "n":
-                print("Aborting.")
-                return
-            elif answer == "Y" or answer == "y":
-                break
-            else:
-                print("Invalid answer.\n")
-
-        content_dict["define"][key] = value
-
-    else:
-        content_dict["define"][key] = value
-
-
-    with open(path, "w") as f:
-        json.dump(content_dict, f, indent=2)
-
-    return
-
-
-
-def create_project(args, arg_pointer, json):
-    """
-    Creates Project file from console args.
-    Usage: ams -p <project file> -i <filename(s)> -o <filename(s)>
-    """
-    out_filename = args[arg_pointer+1]
-    print(f"Creating Project {out_filename}!")
-    arg_pointer += 2
-
-    reading_in = False
-    reading_out = False
-
-    infiles = list()
-    outfiles = list()
-
-    while arg_pointer < len(args):
-
-        if args[arg_pointer] == "-i":
-            reading_in = True
-            reading_out = False
-
-        elif args[arg_pointer] == "-o":
-            reading_in = False
-            reading_out = True
-
-        elif reading_in:
-            infiles.append(args[arg_pointer])
-
-        elif reading_out:
-            outfiles.append(args[arg_pointer])
-
-        else:
-            print("Unknown Command\nType \"ams -h\" for help.")
-            exit()
-
-        arg_pointer += 1
-
-    # print(f"Infiles: {infiles}")
-    # print(f"Outfiles: {outfiles}")
-    if len(infiles) != len(outfiles):
-        print("\nWARNING: Number of input and output files does not match.\n")
-
-    dict = {"ifiles": infiles, "ofiles": outfiles}
-
-    with open(out_filename, "w") as f:
-        json.dump(dict, f, indent=2)
-
-    print("DONE!")
+    for i in range(len(config["ifiles"])):
+        in_file = config["ifiles"][i]
+        out_file = config["ofiles"][i]
+        compile_file(in_file, out_file, args.verbose)
+    
+    # Collect files from directories in config.
+    import os
+    for i in range(0, len(config['dirs']), 2):
+        input_dir = config['dirs'][i]
+        output_dir = config['dirs'][i+1]
+        input_files = []
+        # list all input files
+        for root, dirs, files in os.walk(input_dir, topdown=False):
+            for name in files:
+                input_files.append(os.path.join(root, name))
+            for name in dirs:
+                path = os.path.join(output_dir, name)
+                # create dir if it doesn't exists in output dir
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                    if args.debug:
+                        print(f"Created directory {path} in output dir.")
+        # filter files with right extension
+        if not args.extension is None:
+            input_files = list(filter(lambda name: name.endswith(args.extension), input_files))
+        
+        # generate output file list
+        output_files = [ os.path.join(output_dir, os.path.relpath(path, input_dir)) for path in input_files ]
+        if args.debug:
+            print("input", input_files)
+            print("output", output_files)
+        # Read and compile all of them.
+        for i in range(len(input_files)):
+            compile_file(input_files[i], output_files[i], args.verbose)
 
 
 def build_tree(file, debug = False):
