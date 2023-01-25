@@ -54,13 +54,24 @@ def main():
             with open(args.config, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
                 # verify given config
-                if not ("ifiles" in loaded_config and "ofiles" in loaded_config):
-                    print("ERROR: Config file must provide ifiles and ofiles.")
+                if "ifiles" in loaded_config:
+                    if "ofiles" in loaded_config:
+                        if len(loaded_config["ifiles"]) != len(loaded_config["ofiles"]):
+                            print("ERROR: Number of input files must match output files.")
+                            exit(1)    
+                    else:
+                        print("ERROR: Config file must provide both ifiles and ofiles.")
+                        exit(1)
+                elif "ofiles" in loaded_config:
+                    print("ERROR: Config file must provide both ifiles and ofiles.")
                     exit(1)
-                elif len(loaded_config["ifiles"]) != len(loaded_config["ofiles"]):
-                    print("ERROR: Number of input files must match output files.")
+                if "dirs" in loaded_config and len(loaded_config['dirs']) % 2 == 1:
+                    print("ERROR: Dirs in config file must be pairs of directories.")
                     exit(1)
                 config = loaded_config
+                config.setdefault('ifiles', [])
+                config.setdefault('ofiles', [])
+                config.setdefault('dirs', [])
         except FileNotFoundError:
             print("ERROR: Provided config file could not be found.")
             exit(1)
@@ -104,6 +115,7 @@ def main():
 
         with open(path, "w") as f:
             json.dump(content_dict, f, indent=2)
+    
 
     def compile_file(in_file, out_file, verbose):
         if verbose:
