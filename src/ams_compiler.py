@@ -121,7 +121,7 @@ def main():
         if verbose:
             print(f"Compiling {in_file}...")
 
-        with open(in_file, "r") as inf:
+        with open(in_file, "r", encoding="utf-8") as inf:
             in_text = inf.read()
 
         if "define" in config:
@@ -134,7 +134,7 @@ def main():
 
         out_text = compile_tree_list(tree_list)
 
-        with open(out_file, "w") as out:
+        with open(out_file, "w", encoding="utf-8") as out:
             out.write(out_text)
         if verbose:
             print("DONE!\n")
